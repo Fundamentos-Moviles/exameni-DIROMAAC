@@ -13,41 +13,99 @@ class _MemState extends State<Mem> {
   int cols = 5;
   List<List<Color>> cardColors = [];
   List<List<bool>> isFlipped = [];
+  List<List<bool>> isMatched = [];
+  int? firstSelectedRow;
+  int? firstSelectedCol;
+  int? secondSelectedRow;
+  int? secondSelectedCol;
+  bool canTap = true;
+  bool gameCompleted = false;
   final Color inactiveColor = Colors.grey[300]!;
 
   @override
   void initState() {
     super.initState();
+    initializeGame();
+  }
+
+  void initializeGame() {
+    gameCompleted = false;
+    canTap = true;
+    firstSelectedRow = null;
+    firstSelectedCol = null;
+    secondSelectedRow = null;
+    secondSelectedCol = null;
     generateColors();
   }
 
   void generateColors() {
     int totalCards = rows * cols;
-    Random random = Random();
+    int pairs = totalCards ~/ 2;
+
+    // colores para pares
+    List<Color> uniqueColors = generateUniqueColors(pairs);
+    List<Color> allColors = [];
+
+    // duplicar color para pares
+    for (int i = 0; i < pairs; i++) {
+      allColors.add(uniqueColors[i]);
+      allColors.add(uniqueColors[i]);
+    }
+
+    // mezclar los colores
+    allColors.shuffle();
 
     cardColors = [];
     isFlipped = [];
+    isMatched = [];
 
+    int colorIndex = 0;
     for (int i = 0; i < rows; i++) {
       List<Color> rowColors = [];
       List<bool> rowFlipped = [];
+      List<bool> rowMatched = [];
 
       for (int j = 0; j < cols; j++) {
-        // Generar color aleatorio para cada carta
-        Color randomColor = Color.fromARGB(
+        rowColors.add(allColors[colorIndex]);
+        rowFlipped.add(false);
+        rowMatched.add(false);
+        colorIndex++;
+      }
+
+      cardColors.add(rowColors);
+      isFlipped.add(rowFlipped);
+      isMatched.add(rowMatched);
+    }
+
+    setState(() {});
+  }
+
+  List<Color> generateUniqueColors(int count) {
+    List<Color> colors = [];
+    Random random = Random();
+
+    for (int i = 0; i < count; i++) {
+      Color color;
+      do {
+        color = Color.fromARGB(
           255,
           random.nextInt(256),
           random.nextInt(256),
           random.nextInt(256),
         );
+      } while (colors.any((c) => _areColorsSimilar(c, color)));
 
-        rowColors.add(randomColor);
-        rowFlipped.add(false); // Inicialmente todas las cartas están volteadas hacia abajo
-      }
-
-      cardColors.add(rowColors);
-      isFlipped.add(rowFlipped);
+      colors.add(color);
     }
+
+    return colors;
+  }
+
+  bool _areColorsSimilar(Color c1, Color c2) {
+    const threshold = 50;
+    return (c1.red - c2.red).abs() < threshold &&
+        (c1.green - c2.green).abs() < threshold &&
+        (c1.blue - c2.blue).abs() < threshold;
   }
 
   void changeBoardSize(int newRows, int newCols) {
@@ -55,13 +113,98 @@ class _MemState extends State<Mem> {
       rows = newRows;
       cols = newCols;
     });
-    generateColors();
+    initializeGame();
   }
 
   void onCardTap(int row, int col) {
+    if (!canTap || isFlipped[row][col] || isMatched[row][col]) {
+      return;
+    }
+
     setState(() {
-      isFlipped[row][col] = !isFlipped[row][col];
+      isFlipped[row][col] = true;
+
+      if (firstSelectedRow == null) {
+        // primera carta seleccionada
+        firstSelectedRow = row;
+        firstSelectedCol = col;
+      } else {
+        // segunda carta seleccionada
+        secondSelectedRow = row;
+        secondSelectedCol = col;
+        canTap = false;
+
+        // verificar si coinciden
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          checkMatch();
+        });
+      }
     });
+  }
+
+  void checkMatch() {
+    bool isMatch = cardColors[firstSelectedRow!][firstSelectedCol!] ==
+        cardColors[secondSelectedRow!][secondSelectedCol!];
+
+    setState(() {
+      if (isMatch) {
+        // si coinciden, marcarlas como emparejadas
+        isMatched[firstSelectedRow!][firstSelectedCol!] = true;
+        isMatched[secondSelectedRow!][secondSelectedCol!] = true;
+      } else {
+        // si no coinciden, voltearlas de nuevo
+        isFlipped[firstSelectedRow!][firstSelectedCol!] = false;
+        isFlipped[secondSelectedRow!][secondSelectedCol!] = false;
+      }
+
+      // resetear seleccio
+      firstSelectedRow = null;
+      firstSelectedCol = null;
+      secondSelectedRow = null;
+      secondSelectedCol = null;
+      canTap = true;
+
+      // checar si acabo
+      checkGameCompleted();
+    });
+  }
+
+  void checkGameCompleted() {
+    bool allMatched = true;
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < cols; j++) {
+        if (!isMatched[i][j]) {
+          allMatched = false;
+          break;
+        }
+      }
+      if (!allMatched) break;
+    }
+
+    if (allMatched) {
+      setState(() {
+        gameCompleted = true;
+      });
+
+      // mensaje win
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('¡Felicidades!'),
+            content: const Text('¡Has completado el memorama!'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    }
   }
 
   @override
@@ -73,9 +216,7 @@ class _MemState extends State<Mem> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            onPressed: () {
-              // TODO: Implementar funcionalidad de reiniciar
-            },
+            onPressed: initializeGame,
             icon: const Icon(Icons.refresh),
             tooltip: 'Reiniciar juego',
           ),
@@ -83,7 +224,7 @@ class _MemState extends State<Mem> {
       ),
       body: Column(
         children: [
-          // Controles de tamaño del tablero
+          // tamaños
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -109,7 +250,7 @@ class _MemState extends State<Mem> {
             ),
           ),
 
-          // Tablero del juego
+          // tablero del juego
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -117,13 +258,11 @@ class _MemState extends State<Mem> {
             ),
           ),
 
-          // Botón de reiniciar
+          // reiniciar
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: ElevatedButton(
-              onPressed: () {
-                // TODO: Implementar funcionalidad de reiniciar
-              },
+              onPressed: initializeGame,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blueAccent,
                 foregroundColor: Colors.white,
@@ -164,9 +303,7 @@ class _MemState extends State<Mem> {
 
   Widget buildCard(int row, int col) {
     Color displayColor;
-
-    // Si la carta está volteada, mostrar su color, si no, mostrar el color inactivo
-    if (isFlipped[row][col]) {
+    if (isMatched[row][col] || isFlipped[row][col]) {
       displayColor = cardColors[row][col];
     } else {
       displayColor = inactiveColor;
